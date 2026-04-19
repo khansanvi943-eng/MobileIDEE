@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the IDE",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "integer" },
+        "settings": {
+          "type": "object",
+          "properties": {
+            "openaiKey": { "type": "string" },
+            "customApiKeys": { "type": "object" }
+          }
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "Workspace": {
+      "title": "Workspace",
+      "description": "A workspace/session inside the IDE",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "title": { "type": "string" },
+        "createdAt": { "type": "integer" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["id", "ownerId", "title", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A message within a workspace",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "workspaceId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "role": { "type": "string" },
+        "content": { "type": "string" },
+        "metadata": { "type": "object" },
+        "createdAt": { "type": "integer" }
+      },
+      "required": ["id", "workspaceId", "senderId", "role", "content", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles and settings"
+    },
+    "workspaces/{workspaceId}": {
+      "schema": { "$ref": "#/entities/Workspace" },
+      "description": "User workspaces"
+    },
+    "workspaces/{workspaceId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Messages inside a workspace"
+    }
+  }
+}
