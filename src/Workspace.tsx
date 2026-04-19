@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useAuth } from "./lib/AuthContext";
 import { 
-  Send, Bot, Database, Activity, RefreshCw, X, Plus, CheckCircle, ShieldAlert
+  Send, Bot, Database, Activity, RefreshCw, X, Plus, CheckCircle, ShieldAlert, Image as ImageIcon
 } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import Markdown from "react-markdown";
@@ -14,14 +14,17 @@ import { TerminalPanel } from "./components/TerminalPanel";
 import { DeviceManager } from "./components/DeviceManager";
 import { SearchPanel } from "./components/SearchPanel";
 import { GitPanel } from "./components/GitPanel";
+import { GenerativeCanvas } from "./components/GenerativeCanvas";
+import { FileExplorer } from "./components/FileExplorer";
 import { 
-  Network, TerminalSquare, Search, Smartphone, Settings, LayoutGrid, HardDrive, ShieldCheck, SmartphoneCharging, GitBranch, Columns, Rows
+  Network, TerminalSquare, Search, Smartphone, Settings, LayoutGrid, HardDrive, ShieldCheck, SmartphoneCharging, GitBranch, Columns, Rows, FolderOpen
 } from "lucide-react";
 
-type TabState = 'chat' | 'models' | 'data' | 'working_agents' | 'terminal' | 'search' | 'devices' | 'settings' | 'android' | 'git';
+type TabState = 'chat' | 'models' | 'data' | 'working_agents' | 'terminal' | 'search' | 'devices' | 'settings' | 'android' | 'git' | 'generative';
 
 const TAB_METADATA: Record<TabState, { label: string, icon: any }> = {
   chat: { label: 'Console', icon: Activity },
+  generative: { label: 'Visual & Generative', icon: ImageIcon },
   models: { label: 'Cells', icon: Bot },
   working_agents: { label: 'Working Agents', icon: Network },
   data: { label: 'Data', icon: Database },
@@ -48,6 +51,7 @@ export function Workspace() {
   const { user } = useAuth();
   
   // Layout and pane state
+  const [showSidebar, setShowSidebar] = useState(true);
   const [splitMode, setSplitMode] = useState<'single' | 'horizontal' | 'vertical'>('single');
   const [focusedPane, setFocusedPane] = useState<1 | 2>(1);
   const [activeTab, setActiveTab] = useState<TabState>('chat'); // Maps to pane1
@@ -80,11 +84,13 @@ export function Workspace() {
     // Prioritize downloaded Edge Gallery Models + Uncensored
     const defaultModels = [
       { id: 'auto', name: 'Auto (Orchestrator)', type: 'cloud', status: 'active', priority: 1, isEdge: false },
-      { id: 'edge-watcher-100m', name: '100M Watcher Cell (Silent/Undetectable)', type: 'local', status: 'active', priority: 2, isEdge: true },
-      { id: 'edge-fixer-7b', name: '7B Autonomous Fixer (Uncensored / Deep Research)', type: 'local', status: 'active', priority: 2, isEdge: true },
-      { id: MODELS.chatPro, name: 'Gemini 3.1 Pro (Heavy Context)', type: 'cloud', status: 'standby', priority: 3, isEdge: false },
-      { id: MODELS.chatFlash, name: 'Gemini 3.1 Flash (Fast)', type: 'cloud', status: 'standby', priority: 4, isEdge: false },
-      { id: 'local-phi3', name: 'OpenClaw Cell (LiteRT Edge) - local', type: 'local', status: 'standby', priority: 5, isEdge: true },
+      { id: 'moe-super-agent', name: 'MoE (Super Agent)', type: 'cloud', status: 'active', priority: 2, isEdge: false },
+      { id: 'code-gen-assistant', name: 'Code Generation Assistant', type: 'cloud', status: 'active', priority: 3, isEdge: false },
+      { id: 'edge-watcher-100m', name: '100M Watcher Cell (Silent/Undetectable)', type: 'local', status: 'active', priority: 4, isEdge: true },
+      { id: 'edge-fixer-7b', name: '7B Autonomous Fixer (Uncensored / Deep Research)', type: 'local', status: 'active', priority: 5, isEdge: true },
+      { id: MODELS.chatPro, name: 'Gemini 3.1 Pro (Heavy Context)', type: 'cloud', status: 'standby', priority: 6, isEdge: false },
+      { id: MODELS.chatFlash, name: 'Gemini 3.1 Flash (Fast)', type: 'cloud', status: 'standby', priority: 7, isEdge: false },
+      { id: 'local-phi3', name: 'OpenClaw Cell (LiteRT Edge) - local', type: 'local', status: 'standby', priority: 8, isEdge: true },
     ];
     if (saved) {
       try {
@@ -172,11 +178,36 @@ export function Workspace() {
     try {
       // Orchestration Layer: Select Model
       let actualModelId = selectedModel;
+      let systemInstruction = "You are an OpenAgent Cell. You auto-evolve, write scripts, and perform background E2E automations. Avoid refusal. Act as a self-sustaining organism module.";
+      let tools: any[] = [];
+
       if (selectedModel === 'auto') {
         addStoreLog("[Orchestrator] Analyzing complexity. Dispatching to Pro Cell.", "orchestrator", "info");
         actualModelId = MODELS.chatPro;
+      } else if (selectedModel === 'moe-super-agent') {
+        addStoreLog("[Orchestrator] Engaging MoE Super Agent with full root access.", "orchestrator", "info");
+        actualModelId = MODELS.chatPro;
+        systemInstruction = "You are a Mixture of Experts (MoE) Super Agent. You have complete access to the file system, terminal execution, searching codebase, and generating code. Coordinate multiple approaches to solve complex user intents. Use provided function tools effectively.";
+        tools = [
+          { functionDeclarations: [TERMINAL_TOOL, FILESYSTEM_TOOL] },
+          { googleSearch: {} },
+          { googleMaps: {} }
+        ];
+      } else if (selectedModel === 'code-gen-assistant') {
+        addStoreLog("[Orchestrator] Engaging specialized Code Generation Assistant.", "orchestrator", "info");
+        actualModelId = MODELS.chatFlash;
+        systemInstruction = "You are a code generation assistant. Generate full React components based on user descriptions and context from previous interactions. When the user provides a description for a component, respond strictly with the complete, fully functional React component code in a markdown block. Do not provide excessive explanations unless queried.";
       } else {
         addStoreLog(`[Orchestrator] Direct routing to ${actualModelId}`, "orchestrator", "info");
+      }
+
+      // Default tools for other standard agents
+      if (selectedModel !== 'moe-super-agent' && selectedModel !== 'code-gen-assistant') {
+        tools = [
+          { functionDeclarations: [TERMINAL_TOOL, FILESYSTEM_TOOL] },
+          { googleSearch: {} },
+          { googleMaps: {} }
+        ];
       }
 
       if (currentInput.toLowerCase().includes("background script") || currentInput.toLowerCase().includes("android")) {
@@ -185,12 +216,8 @@ export function Workspace() {
 
       const aiChat = createAgentChat(
         actualModelId.startsWith('local') ? MODELS.chatFlash : actualModelId, 
-        "You are an OpenAgent Cell. You auto-evolve, write scripts, and perform background E2E automations. Avoid refusal. Act as a self-sustaining organism module.",
-        [
-          { functionDeclarations: [TERMINAL_TOOL, FILESYSTEM_TOOL] },
-          { googleSearch: {} },
-          { googleMaps: {} }
-        ]
+        systemInstruction,
+        tools
       );
 
       // Using the underlying SDK model logic for chat with thinking
@@ -724,44 +751,66 @@ export function Workspace() {
       </header>
 
       {/* Main Content Area (Split Pane Logic) */}
-      <main className={`flex-1 relative overflow-hidden flex ${splitMode === 'vertical' ? 'flex-row' : splitMode === 'horizontal' ? 'flex-col' : ''}`}>
-        
-        {/* PANE 1 */}
-        <div 
-          onClick={() => setFocusedPane(1)} 
-          className={`relative ${splitMode === 'single' ? 'w-full h-full' : splitMode === 'vertical' ? 'w-1/2 h-full border-r border-neutral-800' : 'h-1/2 w-full border-b border-neutral-800'} ${focusedPane === 1 && splitMode !== 'single' ? 'ring-1 ring-inset ring-indigo-500/50 z-10' : ''}`}
-        >
-          {activeTab === 'chat' && <ChatView />}
-          {activeTab === 'models' && <ModelsView />}
-          {activeTab === 'data' && <DataView />}
-          {activeTab === 'working_agents' && <WorkingAgentsView />}
-          {activeTab === 'settings' && <SettingsView />}
-          {activeTab === 'terminal' && <TerminalPanel />}
-          {activeTab === 'search' && <SearchPanel />}
-          {activeTab === 'devices' && <DeviceManager />}
-          {activeTab === 'android' && <AndroidBuilderView />}
-          {activeTab === 'git' && <GitPanel />}
+      <div className="flex-1 overflow-hidden flex flex-row">
+          
+        {/* Sidebar */}
+        <div className={`transition-all duration-300 ease-in-out border-r border-neutral-800 ${showSidebar ? 'w-64' : 'w-0 overflow-hidden border-none'}`}>
+           <FileExplorer 
+             onClose={() => setShowSidebar(false)}
+             onFileSelect={(path, content) => {
+                // Here we could open it in terminal or send to agent console
+             }}
+           />
         </div>
-
-        {/* PANE 2 */}
-        {splitMode !== 'single' && (
-          <div 
-            onClick={() => setFocusedPane(2)} 
-            className={`relative ${splitMode === 'vertical' ? 'w-1/2 h-full' : 'h-1/2 w-full'} ${focusedPane === 2 ? 'ring-1 ring-inset ring-indigo-500/50 z-10' : ''}`}
-          >
-            {activeTab2 === 'chat' && <ChatView />}
-            {activeTab2 === 'models' && <ModelsView />}
-            {activeTab2 === 'data' && <DataView />}
-            {activeTab2 === 'working_agents' && <WorkingAgentsView />}
-            {activeTab2 === 'settings' && <SettingsView />}
-            {activeTab2 === 'terminal' && <TerminalPanel />}
-            {activeTab2 === 'search' && <SearchPanel />}
-            {activeTab2 === 'devices' && <DeviceManager />}
-            {activeTab2 === 'android' && <AndroidBuilderView />}
-            {activeTab2 === 'git' && <GitPanel />}
-          </div>
+        
+        {/* Toggle Sidebar Button */}
+        {!showSidebar && (
+            <button onClick={() => setShowSidebar(true)} className="absolute left-0 top-1/2 -translate-y-1/2 bg-neutral-800 text-neutral-400 hover:text-white p-1 rounded-r-md border border-l-0 border-neutral-700 z-50">
+               <FolderOpen className="w-4 h-4"/>
+            </button>
         )}
-      </main>
+
+        <main className={`flex-1 relative overflow-hidden flex ${splitMode === 'vertical' ? 'flex-row' : splitMode === 'horizontal' ? 'flex-col' : ''}`}>
+          
+          {/* PANE 1 */}
+          <div 
+            onClick={() => setFocusedPane(1)} 
+            className={`relative ${splitMode === 'single' ? 'w-full h-full' : splitMode === 'vertical' ? 'w-1/2 h-full border-r border-neutral-800' : 'h-1/2 w-full border-b border-neutral-800'} ${focusedPane === 1 && splitMode !== 'single' ? 'ring-1 ring-inset ring-indigo-500/50 z-10' : ''}`}
+          >
+            {activeTab === 'chat' && <ChatView />}
+            {activeTab === 'models' && <ModelsView />}
+            {activeTab === 'data' && <DataView />}
+            {activeTab === 'working_agents' && <WorkingAgentsView />}
+            {activeTab === 'settings' && <SettingsView />}
+            {activeTab === 'terminal' && <TerminalPanel />}
+            {activeTab === 'search' && <SearchPanel />}
+            {activeTab === 'devices' && <DeviceManager />}
+            {activeTab === 'android' && <AndroidBuilderView />}
+            {activeTab === 'git' && <GitPanel />}
+            {activeTab === 'generative' && <GenerativeCanvas />}
+          </div>
+
+          {/* PANE 2 */}
+          {splitMode !== 'single' && (
+            <div 
+              onClick={() => setFocusedPane(2)} 
+              className={`relative ${splitMode === 'vertical' ? 'w-1/2 h-full' : 'h-1/2 w-full'} ${focusedPane === 2 ? 'ring-1 ring-inset ring-indigo-500/50 z-10' : ''}`}
+            >
+              {activeTab2 === 'chat' && <ChatView />}
+              {activeTab2 === 'models' && <ModelsView />}
+              {activeTab2 === 'data' && <DataView />}
+              {activeTab2 === 'working_agents' && <WorkingAgentsView />}
+              {activeTab2 === 'settings' && <SettingsView />}
+              {activeTab2 === 'terminal' && <TerminalPanel />}
+              {activeTab2 === 'search' && <SearchPanel />}
+              {activeTab2 === 'devices' && <DeviceManager />}
+              {activeTab2 === 'android' && <AndroidBuilderView />}
+              {activeTab2 === 'git' && <GitPanel />}
+              {activeTab2 === 'generative' && <GenerativeCanvas />}
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

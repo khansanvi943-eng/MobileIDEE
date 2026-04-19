@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { GitBranch, Search, Loader2, RefreshCw, Download, Scissors, Eye, FileText, CheckSquare, Square, FileDiff } from 'lucide-react';
+import { GitBranch, Search, Loader2, RefreshCw, Download, Scissors, Eye, FileText, CheckSquare, Square, FileDiff, Bot } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { getAI } from '../lib/gemini';
 
 export const GitPanel: React.FC = () => {
     const [output, setOutput] = useState<string>('');
@@ -99,6 +100,48 @@ export const GitPanel: React.FC = () => {
         fetchGitState();
     };
 
+    const handleAutoCommitAgent = async () => {
+        setLoading(true);
+        try {
+            // Get diff
+            const diffOut = await execGit('diff', true);
+            const stagedOut = await execGit('diff --cached', true);
+            const statusOut = await execGit('status', true);
+            const fullDiff = `STATUS:\n${statusOut}\n\nSTAGED:\n${stagedOut || ''}\n\nUNSTAGED:\n${diffOut || ''}`;
+
+            if (!fullDiff.trim() || fullDiff === '\n') {
+                setOutput('Agent Error: No changes detected to commit.');
+                setLoading(false);
+                return;
+            }
+
+            setOutput('Agent is analyzing changes and generating commit message...');
+            
+            // Ask Gemini to generate commit message
+            const ai = getAI();
+            const response = await ai.models.generateContent({
+               model: 'gemini-3.1-flash-preview',
+               contents: `Generate a concise, professional Git commit message based on the following diff and status. Only output the commit message string, nothing else. Do not use markdown blocks.\n\n${fullDiff}`
+            });
+            const generatedMsg = response.text()?.trim().replace(/^["']|["']$/g, '');
+            if (!generatedMsg) {
+                throw new Error("Failed to generate message from AI.");
+            }
+
+            setOutput(`Generated message: "${generatedMsg}". Committing...`);
+            
+            await execGit('add .', true);
+            await execGit(`commit -m "${generatedMsg.replace(/"/g, '\\"')}"`, true);
+            
+            setOutput(`Successful AI Auto Commit: ${generatedMsg}`);
+            fetchGitState();
+        } catch (e: any) {
+            setOutput('Agent Error: ' + e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleCreateBranch = async () => {
         if (!newBranch) return;
         await execGit(`checkout -b "${newBranch}"`);
@@ -183,7 +226,16 @@ export const GitPanel: React.FC = () => {
 
                     {/* Commit Box */}
                     <div className="space-y-2 bg-neutral-900/40 p-3 rounded-lg border border-neutral-800/50">
-                        <h3 className="text-xs font-semibold uppercase text-neutral-500 tracking-wider">Commit Changes</h3>
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-xs font-semibold uppercase text-neutral-500 tracking-wider">Commit Changes</h3>
+                            <Button 
+                              onClick={handleAutoCommitAgent} 
+                              disabled={loading} 
+                              className="h-6 bg-indigo-600 hover:bg-indigo-500 text-[10px] font-bold px-2 rounded-sm text-white flex items-center gap-1"
+                            >
+                               <Bot className="w-3 h-3" /> Auto Commit
+                            </Button>
+                        </div>
                         <div className="flex flex-col gap-2">
                             <textarea 
                                 value={commitMsg}
