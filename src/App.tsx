@@ -1,6 +1,7 @@
 import React from 'react';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 import { Workspace } from './Workspace';
+import { ScreenWatcher } from './components/ScreenWatcher';
 import { Button } from '@/components/ui/button';
 import { Code } from 'lucide-react';
 
@@ -40,6 +41,7 @@ function MainLayout() {
 export default function App() {
   return (
     <AuthProvider>
+      <ScreenWatcher />
       <MainLayout />
     </AuthProvider>
   );

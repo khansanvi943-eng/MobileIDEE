@@ -3,9 +3,11 @@ import { useAuth } from "./lib/AuthContext";
 import { 
   Send, Bot, Database, Activity, RefreshCw, X, Plus, CheckCircle, ShieldAlert, Image as ImageIcon, QrCode
 } from "lucide-react";
+import { Reorder } from "motion/react";
 import { v4 as uuidv4 } from "uuid";
 import Markdown from "react-markdown";
 import { useIdeStore } from "./store/ideStore";
+import { Button } from "@/components/ui/button";
 import { getAI, MODELS, createAgentChat, TERMINAL_TOOL, FILESYSTEM_TOOL } from "./lib/gemini";
 import { db } from "./lib/firebase";
 import { doc, setDoc } from "firebase/firestore";
@@ -17,11 +19,16 @@ import { GitPanel } from "./components/GitPanel";
 import { GenerativeCanvas } from "./components/GenerativeCanvas";
 import { FileExplorer } from "./components/FileExplorer";
 import { TaskScheduler } from "./components/TaskScheduler";
+import { OrchestratorMonitor } from "./components/OrchestratorMonitor";
+import { CommandLineInterface } from "./components/CommandLineInterface";
+import { HealthDashboard } from "./components/HealthDashboard";
+import { DeploymentModule } from "./components/DeploymentModule";
+import { io, Socket } from "socket.io-client";
 import { 
-  Network, TerminalSquare, Search, Smartphone, Settings, LayoutGrid, HardDrive, ShieldCheck, SmartphoneCharging, GitBranch, Columns, Rows, FolderOpen, ListTodo
+  Network, TerminalSquare, Search, Smartphone, Settings, LayoutGrid, HardDrive, ShieldCheck, SmartphoneCharging, GitBranch, Columns, Rows, FolderOpen, ListTodo, History, Cpu, Zap, Package, Users, Trash2, Boxes
 } from "lucide-react";
 
-type TabState = 'chat' | 'models' | 'data' | 'working_agents' | 'terminal' | 'search' | 'devices' | 'settings' | 'android' | 'git' | 'generative' | 'tasks';
+type TabState = 'chat' | 'models' | 'data' | 'working_agents' | 'terminal' | 'search' | 'devices' | 'settings' | 'android' | 'git' | 'generative' | 'tasks' | 'recovery' | 'orchestrate' | 'health' | 'deploy';
 
 const TAB_METADATA: Record<TabState, { label: string, icon: any }> = {
   chat: { label: 'Console', icon: Activity },
@@ -35,7 +42,11 @@ const TAB_METADATA: Record<TabState, { label: string, icon: any }> = {
   devices: { label: 'Devices', icon: Smartphone },
   settings: { label: 'Settings', icon: Settings },
   android: { label: 'Android Build', icon: SmartphoneCharging },
-  tasks: { label: 'Tasks', icon: ListTodo }
+  tasks: { label: 'Tasks', icon: ListTodo },
+  recovery: { label: 'Recovery', icon: ShieldCheck },
+  orchestrate: { label: 'Deep Orchestrator', icon: Cpu },
+  health: { label: 'Health', icon: Zap },
+  deploy: { label: 'Deploy', icon: Package }
 };
 
 type Message = {
@@ -58,6 +69,7 @@ export function Workspace() {
   const [focusedPane, setFocusedPane] = useState<1 | 2>(1);
   const [activeTab, setActiveTab] = useState<TabState>('chat'); // Maps to pane1
   const [activeTab2, setActiveTab2] = useState<TabState>('terminal'); // Maps to pane 2
+  const [layoutOrder, setLayoutOrder] = useState(['single', 'vertical', 'horizontal']);
   const [openTabs, setOpenTabs] = useState<TabState[]>(['chat']);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -112,6 +124,23 @@ export function Workspace() {
   });
   
   const [newModelConfig, setNewModelConfig] = useState("");
+  const [isAddingAgent, setIsAddingAgent] = useState(false);
+  const [newAgent, setNewAgent] = useState({
+    name: '',
+    model: 'gemini-3.1-pro-preview',
+    framework: 'OpenClaw',
+    systemInstruction: '',
+    mcpServers: ['filesystem', 'terminal']
+  });
+
+  const presets = useIdeStore(s => s.presets);
+  const addPreset = useIdeStore(s => s.addPreset);
+  const deletePreset = useIdeStore(s => s.deletePreset);
+  const activeCells = useIdeStore(s => s.activeCells);
+  const spawnCell = useIdeStore(s => s.spawnCell);
+  const terminateCell = useIdeStore(s => s.terminateCell);
+  const isLocalMode = useIdeStore(s => s.isLocalMode);
+  const setLocalMode = useIdeStore(s => s.setLocalMode);
 
   useEffect(() => {
     localStorage.setItem('openagentsSelectedModel', selectedModel);
@@ -126,6 +155,64 @@ export function Workspace() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   
   const [workspaceId] = useState(() => uuidv4());
+
+  useEffect(() => {
+    if (user?.uid) {
+      setDoc(doc(db, "workspaces", workspaceId), {
+        id: workspaceId,
+        ownerId: user.uid,
+        title: "Active Session",
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      }, { merge: true }).catch(err => {
+        addStoreLog(`[System] Workspace creation failed: ${err.message}`, 'system', 'error');
+      });
+    }
+  }, [user?.uid, workspaceId, addStoreLog]);
+
+  const createSnapshot = useIdeStore(s => s.createSnapshot);
+  const network = useIdeStore(s => s.network);
+  const updateNetwork = useIdeStore(s => s.updateNetwork);
+  const collaborators = useIdeStore(s => s.collaborators);
+  const socketRef = useRef<Socket | null>(null);
+
+  useEffect(() => {
+    socketRef.current = io();
+    const socket = socketRef.current;
+
+    socket.emit("join-workspace", workspaceId);
+
+    socket.on("connect", () => {
+      updateNetwork({ isConnected: true });
+    });
+
+    socket.on("remote-cell-action", (action) => {
+      addStoreLog(`[Network] Peer Agent Action: ${action}`, 'cell', 'info');
+    });
+
+    return () => {
+        socket.disconnect();
+    };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    // UI Heartbeat - let the Screen Watcher know we are alive and rendering
+    const interval = setInterval(() => {
+      window.dispatchEvent(new CustomEvent('ui-heartbeat', { detail: { timestamp: Date.now(), workspaceId } }));
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [workspaceId]);
+
+  useEffect(() => {
+    // Stable Snapshot logic - every 2 minutes
+    const interval = setInterval(() => {
+      if (!isGenerating && messages.length > 0) {
+        createSnapshot(`Auto-snapshot at ${new Date().toLocaleTimeString()}`, activeTab, activeTab2, splitMode);
+        addStoreLog('[Watcher Cell] Workspace state captured and projected to recovery buffer.', 'cell');
+      }
+    }, 120000);
+    return () => clearInterval(interval);
+  }, [isGenerating, messages.length, activeTab, activeTab2, splitMode, createSnapshot]);
 
   useEffect(() => {
     // Initial orchestrator boot message
@@ -224,7 +311,7 @@ export function Workspace() {
 
       // Using the underlying SDK model logic for chat with thinking
       const stream = await aiChat.sendMessageStream({
-        parts: attachments.length > 0 
+        message: attachments.length > 0 
           ? [
               { text: currentInput },
               ...attachments.map(att => ({
@@ -406,94 +493,127 @@ export function Workspace() {
   );
 
   const ModelsView = () => (
-    <div className="flex flex-col h-full bg-neutral-950 text-white overflow-y-auto p-4 sm:p-6">
-      <div className="max-w-2xl mx-auto w-full space-y-8">
-        <div>
-          <h2 className="text-xl font-bold mb-2 flex items-center gap-2">
-            <Bot className="w-6 h-6 text-indigo-400" />
-            Active Cells & Models
-          </h2>
-          <p className="text-sm text-neutral-400">Configure your orchestrator network. Select 'Auto' for dynamic MoE assignment.</p>
+    <div className="flex flex-col h-full bg-neutral-950 text-white overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+      <div className="max-w-4xl mx-auto w-full space-y-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <Bot className="w-6 h-6 text-indigo-400" />
+              AI Cell Configurations
+            </h2>
+            <p className="text-sm text-neutral-400">Configure and deploy specialized agent units.</p>
+          </div>
+          <button 
+            onClick={() => setIsAddingAgent(!isAddingAgent)}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-all"
+          >
+            {isAddingAgent ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+            {isAddingAgent ? 'Cancel' : 'New Configuration'}
+          </button>
         </div>
 
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-emerald-400 border-b border-emerald-900/30 pb-2 flex justify-between items-center">
-             <span>Edge Gallery (Locally Available)</span>
-             <span className="text-[10px] text-emerald-600 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">Priority Tier 1</span>
-          </h3>
-          {models.filter(m => m.isEdge || m.type === 'local').sort((a,b) => a.priority - b.priority).map(model => (
-            <div 
-              key={model.id}
-              onClick={() => setSelectedModel(model.id)}
-              className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
-                selectedModel === model.id 
-                  ? 'bg-indigo-900/20 border-indigo-500 shadow-[0_0_15px_rgba(79,70,229,0.15)]' 
-                  : 'bg-neutral-900 border-neutral-800 hover:border-neutral-600'
-              }`}
-            >
-              <div>
-                <div className="font-medium">{model.name}</div>
-                <div className="text-xs text-neutral-500 font-mono mt-1 flex items-center gap-2">
-                  <span className={`inline-block w-2 h-2 rounded-full ${model.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-                  {model.type.toUpperCase()} ORCHESTRATION
+        {isAddingAgent && (
+          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 space-y-4 animate-in fade-in zoom-in-95 duration-200">
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                   <label className="text-[10px] uppercase font-bold text-neutral-500">Preset Name</label>
+                   <input 
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                      value={newAgent.name}
+                      onChange={e => setNewAgent({...newAgent, name: e.target.value})}
+                      placeholder="e.g., Code Specialist"
+                   />
                 </div>
-              </div>
-              {selectedModel === model.id && <CheckCircle className="w-5 h-5 text-indigo-400" />}
-            </div>
-          ))}
-
-          <h3 className="text-sm font-semibold text-indigo-400 border-b border-indigo-900/30 pb-2 mt-6 flex justify-between items-center">
-             <span>Cloud Proxies & Auto</span>
-          </h3>
-          {models.filter(m => !m.isEdge && m.type !== 'local').map(model => (
-            <div 
-              key={model.id}
-              onClick={() => setSelectedModel(model.id)}
-              className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
-                selectedModel === model.id 
-                  ? 'bg-indigo-900/20 border-indigo-500 shadow-[0_0_15px_rgba(79,70,229,0.15)]' 
-                  : 'bg-neutral-900 border-neutral-800 hover:border-neutral-600'
-              }`}
-            >
-              <div>
-                <div className="font-medium">{model.name}</div>
-                <div className="text-xs text-neutral-500 font-mono mt-1 flex items-center gap-2">
-                  <span className={`inline-block w-2 h-2 rounded-full ${model.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-                  {model.type.toUpperCase()} ORCHESTRATION
+                <div className="space-y-1.5">
+                   <label className="text-[10px] uppercase font-bold text-neutral-500">Framework</label>
+                   <select 
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500 outline-none"
+                      value={newAgent.framework}
+                      onChange={e => setNewAgent({...newAgent, framework: e.target.value})}
+                   >
+                      <option>OpenClaw</option>
+                      <option>SearchAgent</option>
+                      <option>DevinClone</option>
+                      <option>Custom Python Context</option>
+                   </select>
                 </div>
-              </div>
-              {selectedModel === model.id && <CheckCircle className="w-5 h-5 text-indigo-400" />}
-            </div>
-          ))}
-        </div>
+                <div className="space-y-1.5 md:col-span-2">
+                   <label className="text-[10px] uppercase font-bold text-neutral-500">System Instruction</label>
+                   <textarea 
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-sm h-24 focus:ring-1 focus:ring-indigo-500 outline-none resize-none"
+                      value={newAgent.systemInstruction}
+                      onChange={e => setNewAgent({...newAgent, systemInstruction: e.target.value})}
+                      placeholder="Be a concise senior engineer..."
+                   />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                   <label className="text-[10px] uppercase font-bold text-neutral-500">MCP Servers / Tools</label>
+                   <div className="flex flex-wrap gap-2 pt-1">
+                      {['filesystem', 'terminal', 'google-search', 'git', 'android'].map(tool => (
+                        <button 
+                           key={tool}
+                           onClick={() => {
+                              const tools = newAgent.mcpServers.includes(tool)
+                                ? newAgent.mcpServers.filter(t => t !== tool)
+                                : [...newAgent.mcpServers, tool];
+                              setNewAgent({...newAgent, mcpServers: tools});
+                           }}
+                           className={`px-3 py-1 rounded-full text-[10px] border transition-all ${
+                             newAgent.mcpServers.includes(tool) 
+                               ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300' 
+                               : 'bg-neutral-800 border-neutral-700 text-neutral-500'
+                           }`}
+                        >
+                           {tool}
+                        </button>
+                      ))}
+                   </div>
+                </div>
+             </div>
+             <div className="flex justify-end gap-3 pt-4 border-t border-neutral-800">
+                <Button 
+                   variant="ghost" 
+                   onClick={() => addPreset(newAgent)}
+                   disabled={!newAgent.name}
+                   className="text-indigo-400 hover:text-indigo-300"
+                >
+                   Save as Preset
+                </Button>
+                <Button 
+                   onClick={() => {
+                      spawnCell(newAgent as any);
+                      setIsAddingAgent(false);
+                      addStoreLog(`[Dynamic Allocator] Spawning ${newAgent.name} cell on mesh.`, 'orchestrator');
+                   }}
+                   disabled={!newAgent.name}
+                >
+                   Spawn Immediate Cell
+                </Button>
+             </div>
+          </div>
+        )}
 
-        <div className="pt-6 border-t border-neutral-800">
-          <h3 className="text-sm font-semibold mb-1 text-neutral-300">Force Download New Open Source / Uncensored Cell</h3>
-          <p className="text-[10px] text-neutral-500 mb-3">Links to huggingface or local Edge Gallery manifests. Auto-allocates to local storage.</p>
-          <div className="flex gap-2">
-            <input 
-              type="text"
-              placeholder="e.g. huggingface/mobile-bert..."
-              className="flex-1 bg-neutral-900 border border-neutral-800 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              value={newModelConfig}
-              onChange={e => setNewModelConfig(e.target.value)}
-            />
-            <button 
-              className="bg-neutral-800 hover:bg-neutral-700 text-white px-4 rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50"
-              onClick={() => {
-                if(newModelConfig.trim()) {
-                  addStoreLog(`[Edge Gallery Sync] Pulling custom unfiltered weights for ${newModelConfig}...`, 'system', 'info');
-                  setTimeout(() => {
-                     setModels([...models, { id: 'custom-' + Date.now(), name: newModelConfig, type: 'local', status: 'standby', isEdge: true, priority: 1 }]);
-                     setNewModelConfig("");
-                     addStoreLog(`[Edge Gallery Sync] ${newModelConfig} compiled into local Edge Cell.`, 'system', 'success');
-                  }, 1500);
-                }
-              }}
-              disabled={!newModelConfig.trim()}
-            >
-              <Plus className="w-4 h-4" /> Pull to Edge
-            </button>
+        <div className="space-y-6">
+          <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
+             <Package className="w-4 h-4" /> Configuration Presets
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+             {presets.map(preset => (
+               <div key={preset.id} className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl hover:border-indigo-900/50 transition-all group relative">
+                  <div className="flex items-center justify-between mb-2">
+                     <span className="font-bold text-indigo-400">{preset.name}</span>
+                     <div className="flex items-center gap-1">
+                        <button onClick={() => spawnCell(preset)} className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-emerald-400 transition-colors" title="Spawn Cell"><Zap className="w-3.5 h-3.5"/></button>
+                        <button onClick={() => deletePreset(preset.id)} className="p-1.5 hover:bg-neutral-800 text-neutral-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete"><Trash2 className="w-3.5 h-3.5"/></button>
+                     </div>
+                  </div>
+                  <div className="text-[10px] text-neutral-500 mb-2 truncate">{preset.systemInstruction}</div>
+                  <div className="flex flex-wrap gap-1">
+                     <span className="text-[9px] bg-neutral-950 px-1.5 py-0.5 rounded text-neutral-400">{preset.framework}</span>
+                     <span className="text-[9px] bg-neutral-950 px-1.5 py-0.5 rounded text-neutral-400">{preset.model}</span>
+                  </div>
+               </div>
+             ))}
           </div>
         </div>
       </div>
@@ -543,36 +663,77 @@ export function Workspace() {
   );
 
   const WorkingAgentsView = () => (
-    <div className="flex flex-col h-full bg-neutral-950 text-white overflow-y-auto p-4 sm:p-6">
-      <div className="max-w-2xl mx-auto w-full space-y-6">
-        <div>
-          <h2 className="text-xl font-bold mb-2 flex items-center gap-2">
-            <Network className="w-6 h-6 text-indigo-400" />
-            Active Working Agents
-          </h2>
-          <p className="text-sm text-neutral-400">Currently executing cells and background scripts running across devices.</p>
-        </div>
-        <div className="space-y-4">
-          <div className="p-4 rounded-xl border border-indigo-500/50 bg-indigo-900/10 cursor-pointer hover:bg-indigo-900/20 transition-all">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-indigo-400 flex items-center gap-2"><RefreshCw className="w-4 h-4 animate-spin" /> OpenClaw Shell Worker</span>
-              <span className="text-xs text-neutral-500 font-mono">PID: 9284</span>
-            </div>
-            <div className="text-sm text-neutral-300 mt-2">Executing E2E test script on background Android environment...</div>
-            <div className="mt-3 flex gap-2 text-xs">
-              <span className="px-2 py-1 bg-neutral-800 rounded">CPU: 42%</span>
-              <span className="px-2 py-1 bg-neutral-800 rounded">RAM: 1.2GB</span>
-            </div>
+    <div className="flex flex-col h-full bg-neutral-950 text-white overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+      <div className="max-w-4xl mx-auto w-full space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold flex items-center gap-2">
+              <Network className="w-6 h-6 text-indigo-400" />
+              Active Mesh Mesh Cells
+            </h2>
+            <p className="text-sm text-neutral-400">Detailed telemetry and task tracking for all live agent nodes.</p>
           </div>
-          {isGenerating && (
-            <div className="p-4 rounded-xl border border-emerald-500/50 bg-emerald-900/10 cursor-pointer hover:bg-emerald-900/20 transition-all">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-emerald-400 flex items-center gap-2"><RefreshCw className="w-4 h-4 animate-spin" /> Auto Orchestrator (Pro)</span>
-                <span className="text-xs text-neutral-500 font-mono">PID: 1102</span>
-              </div>
-              <div className="text-sm text-neutral-300 mt-2">Streaming structured outputs and analyzing E2E context...</div>
+          <div className="text-[10px] bg-neutral-900 border border-neutral-800 px-3 py-1 rounded-full text-neutral-500 font-mono uppercase tracking-[0.2em]">
+            Nodes: {activeCells.length}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {activeCells.length === 0 && (
+            <div className="md:col-span-2 p-12 border border-dashed border-neutral-800 rounded-2xl flex flex-col items-center justify-center text-neutral-600 gap-4">
+               <Boxes className="w-12 h-12 opacity-20" />
+               <p className="text-sm italic">No active cells in current mesh. Allocation pending task orchestration.</p>
             </div>
           )}
+          {activeCells.map(cell => (
+            <div key={cell.id} className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl hover:border-indigo-900/50 transition-all space-y-4 group overflow-hidden relative">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-2.5 h-2.5 rounded-full ${
+                    cell.status === 'working' ? 'bg-indigo-400 animate-pulse' :
+                    cell.status === 'error' ? 'bg-red-500' : 'bg-emerald-500'
+                  }`} />
+                  <div>
+                    <div className="font-bold text-sm text-white">{cell.config.name}</div>
+                    <div className="text-[10px] text-neutral-500 uppercase font-mono">ID: {cell.id}</div>
+                  </div>
+                </div>
+                <button onClick={() => terminateCell(cell.id)} className="p-2 hover:bg-neutral-800 text-neutral-600 hover:text-red-400 rounded transition-colors">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                 <div className="text-xs text-neutral-400 italic bg-black/30 p-2 rounded border border-neutral-800/50">
+                    {cell.currentTask || 'Idle: Listening for orchestration cues...'}
+                 </div>
+                 
+                 <div className="grid grid-cols-3 gap-2">
+                    <div className="p-2 bg-neutral-950 rounded border border-neutral-800 items-center justify-center flex flex-col">
+                       <span className="text-[10px] text-neutral-500 uppercase font-bold mb-1">CPU</span>
+                       <span className={`text-xs font-mono ${cell.telemetry.cpu > 80 ? 'text-red-400' : 'text-emerald-400'}`}>{cell.telemetry.cpu}%</span>
+                    </div>
+                    <div className="p-2 bg-neutral-950 rounded border border-neutral-800 items-center justify-center flex flex-col">
+                       <span className="text-[10px] text-neutral-500 uppercase font-bold mb-1">RAM</span>
+                       <span className="text-xs font-mono text-indigo-400">{cell.telemetry.memory}GB</span>
+                    </div>
+                    <div className="p-2 bg-neutral-950 rounded border border-neutral-800 items-center justify-center flex flex-col">
+                       <span className="text-[10px] text-neutral-500 uppercase font-bold mb-1">Error</span>
+                       <span className={`text-xs font-mono ${cell.telemetry.errorRate > 0 ? 'text-red-400' : 'text-neutral-500'}`}>{cell.telemetry.errorRate}%</span>
+                    </div>
+                 </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 pt-2 border-t border-neutral-800 overflow-x-auto no-scrollbar pb-1">
+                 <span className="text-[8px] font-bold text-neutral-600 uppercase mr-1">Stack:</span>
+                 <span className="text-[8px] bg-neutral-800 px-1.5 py-0.5 rounded text-neutral-400 border border-neutral-700">{cell.config.framework}</span>
+                 <span className="text-[8px] bg-neutral-800 px-1.5 py-0.5 rounded text-neutral-400 border border-neutral-700">{cell.config.model}</span>
+                 {cell.config.mcpServers.map(mcp => (
+                   <span key={mcp} className="text-[8px] bg-indigo-900/10 text-indigo-400 border border-indigo-900/30 px-1.5 py-0.5 rounded">{mcp}</span>
+                 ))}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -590,6 +751,19 @@ export function Workspace() {
         </div>
         
         <div className="space-y-4">
+          <div className="flex justify-between items-center p-4 rounded-xl border border-neutral-800 bg-neutral-900">
+            <div>
+              <div className="font-medium text-amber-500 flex items-center gap-1">100% Local Mode <Zap className="w-4 h-4"/></div>
+              <div className="text-xs text-neutral-500">Bypass all cloud research and force local mesh only.</div>
+            </div>
+            <div 
+               className={`relative inline-flex items-center h-6 rounded-full w-11 transition-all cursor-pointer ${isLocalMode ? 'bg-amber-600' : 'bg-neutral-700'}`}
+               onClick={() => setLocalMode(!isLocalMode)}
+            >
+               <div className={`inline-block w-5 h-5 transform bg-white rounded-full transition-all ${isLocalMode ? 'translate-x-6' : 'translate-x-1'}`} />
+            </div>
+          </div>
+
           <div className="flex justify-between items-center p-4 rounded-xl border border-neutral-800 bg-neutral-900">
             <div>
               <div className="font-medium text-emerald-400 flex items-center gap-1">OpenAgents.org A2A Network <Network className="w-4 h-4"/></div>
@@ -641,6 +815,89 @@ export function Workspace() {
       </div>
     </div>
   );
+
+  const RecoveryView = () => {
+    const snapshots = useIdeStore(s => s.snapshots);
+    const revertToSnapshot = useIdeStore(s => s.revertToSnapshot);
+    const isUiHealed = useIdeStore(s => s.isUiHealed);
+
+    return (
+      <div className="flex flex-col h-full bg-neutral-950 p-6 space-y-6 overflow-y-auto">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold flex items-center gap-2 text-white">
+              <ShieldCheck className="w-6 h-6 text-indigo-400" />
+              Sentinel UI Recovery Cell
+            </h2>
+            <p className="text-sm text-neutral-400">Autonomous screen watching and state reverting for self-healing workspace.</p>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-full">
+            <div className={`w-2 h-2 rounded-full ${isUiHealed ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+            <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-widest">{isUiHealed ? 'UI Healthy' : 'Scanning UI...'}</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl space-y-4">
+            <h3 className="text-sm font-semibold text-neutral-300 flex items-center gap-2 italic">
+              <Activity className="w-4 h-4" /> Live Screen Metrics
+            </h3>
+            <div className="space-y-3">
+              <div className="flex justify-between text-xs">
+                <span className="text-neutral-500">DOM Integrity</span>
+                <span className="text-emerald-400">100%</span>
+              </div>
+              <div className="h-1.5 w-full bg-black rounded-full overflow-hidden">
+                <div className="h-full w-full bg-emerald-500" />
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-neutral-500">Agent Handshake</span>
+                <span className="text-emerald-400 text-nowrap">Active (SSE Locked)</span>
+              </div>
+              <div className="h-1.5 w-full bg-black rounded-full overflow-hidden">
+                <div className="h-full w-[95%] bg-indigo-500" />
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl">
+             <div className="flex items-center gap-3 text-indigo-400 text-sm font-bold mb-4 uppercase tracking-tighter">
+                <RefreshCw className="w-4 h-4 animate-spin-slow" /> Autonomous Rollback Buffer
+             </div>
+             <p className="text-[11px] text-neutral-500 leading-relaxed mb-4">
+                The Sentinel Cell captures snapshots of your workspace state every 2 minutes. In case of an unresponsive UI, it will automatically revert to the most recent stable snapshot.
+             </p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-neutral-400 uppercase tracking-widest">Snapshot History</h3>
+          <div className="space-y-2">
+            {snapshots.length === 0 ? (
+              <div className="p-8 border border-dashed border-neutral-800 rounded-xl text-center text-neutral-500 italic text-sm">
+                No stability snapshots recorded yet. Workspace needs 2 minutes of uptime for first capture.
+              </div>
+            ) : snapshots.map(s => (
+              <div key={s.id} className="p-3 bg-neutral-900/50 border border-neutral-800 rounded-lg flex items-center justify-between hover:border-indigo-900/50 transition-colors">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 bg-black rounded flex items-center justify-center border border-neutral-800">
+                    <History className="w-5 h-5 text-neutral-500" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-neutral-200">{s.description}</div>
+                    <div className="text-[10px] font-mono text-neutral-500">{new Date(s.timestamp).toLocaleString()} | {s.taskCount} Tasks | {s.splitMode} Layout</div>
+                  </div>
+                </div>
+                <Button variant="outline" size="sm" className="h-8 text-xs border-indigo-900/50 text-indigo-400 hover:bg-indigo-900/20" onClick={() => revertToSnapshot(s.id)}>
+                   Manual Revert
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const AndroidBuilderView = () => {
     const [isPairing, setIsPairing] = useState(false);
@@ -715,9 +972,7 @@ export function Workspace() {
               </button>
            </div>
         </div>
-// ... (rest of the view remains)
-
-
+        
         <div className="mt-6 border border-neutral-800 rounded-xl bg-neutral-950 overflow-hidden">
            <div className="bg-neutral-900 border-b border-neutral-800 p-2 px-4 flex justify-between items-center text-xs font-mono text-neutral-500">
               <span>Google Drive Log Stream (SSE Async Multi-threaded)</span>
@@ -731,37 +986,82 @@ export function Workspace() {
       </div>
     </div>
   );
-  
+};
+
   return (
     <div className="flex flex-col h-screen w-full bg-black overflow-hidden font-sans">
+      {/* Mesh Header */}
+      <div className="bg-neutral-950 border-b border-neutral-900 px-4 py-1.5 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500/20" />
+            <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">Mesh Node Live</span>
+          </div>
+          <div className="h-3 w-[1px] bg-neutral-800" />
+          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-950/20 border border-emerald-900/30">
+            <div className={`w-1.5 h-1.5 rounded-full ${network.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+            <span className="text-[9px] font-mono text-emerald-400 uppercase">{network.meshId}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+           {collaborators.length > 0 && (
+             <div className="flex -space-x-1.5 mr-2">
+                {collaborators.map(c => (
+                  <div key={c.id} className={`w-5 h-5 rounded-full border border-neutral-950 flex items-center justify-center text-[8px] font-bold ${c.color} text-white`} title={c.name}>
+                     {c.name[0]}
+                  </div>
+                ))}
+                <div className="w-5 h-5 rounded-full border border-neutral-950 bg-neutral-900 flex items-center justify-center">
+                   <Users className="w-2.5 h-2.5 text-neutral-600" />
+                </div>
+             </div>
+           )}
+           <div className="text-[9px] text-neutral-600 font-mono tracking-tighter">
+              NODES: {network.peerCount + 1} | SYNC: 100%
+           </div>
+        </div>
+      </div>
+
       {/* Top Mobile-Friendly Header Tabs */}
       <header className="bg-neutral-900 border-b border-neutral-800 shrink-0 z-10 safe-top overflow-x-auto no-scrollbar">
         <div className="flex w-max min-w-full relative">
           {/* Header Utilities */}
           <div className="absolute right-0 top-0 bottom-0 pr-4 flex items-center gap-2 bg-gradient-to-l from-neutral-900 via-neutral-900 to-transparent pl-8 z-20">
-             <div className="bg-neutral-800 rounded-lg p-1 flex gap-1">
-                <button onClick={() => { setSplitMode('single'); setFocusedPane(1); }} className={`p-1.5 rounded ${splitMode === 'single' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-700'}`} title="Single Pane">
-                   <LayoutGrid className="w-4 h-4" />
-                </button>
-                <button onClick={() => { setSplitMode('vertical'); setFocusedPane(2); if(!openTabs.includes(activeTab2)) setOpenTabs([...openTabs, activeTab2]); }} className={`p-1.5 rounded ${splitMode === 'vertical' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-700'}`} title="Split Vertical">
-                   <Columns className="w-4 h-4" />
-                </button>
-                <button onClick={() => { setSplitMode('horizontal'); setFocusedPane(2); if(!openTabs.includes(activeTab2)) setOpenTabs([...openTabs, activeTab2]); }} className={`p-1.5 rounded ${splitMode === 'horizontal' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-700'}`} title="Split Horizontal">
-                   <Rows className="w-4 h-4" />
-                </button>
-             </div>
+             <Reorder.Group axis="x" values={layoutOrder} onReorder={setLayoutOrder} className="bg-neutral-800 rounded-lg p-1 flex gap-1">
+                {layoutOrder.map(order => (
+                  <Reorder.Item key={order} value={order}>
+                    {order === 'single' && (
+                      <button onClick={() => { setSplitMode('single'); setFocusedPane(1); }} className={`p-1.5 rounded ${splitMode === 'single' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-700'}`} title="Single Pane">
+                        <LayoutGrid className="w-4 h-4" />
+                      </button>
+                    )}
+                    {order === 'vertical' && (
+                      <button onClick={() => { setSplitMode('vertical'); setFocusedPane(2); if(!openTabs.includes(activeTab2)) setOpenTabs([...openTabs, activeTab2]); }} className={`p-1.5 rounded ${splitMode === 'vertical' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-700'}`} title="Split Vertical">
+                        <Columns className="w-4 h-4" />
+                      </button>
+                    )}
+                    {order === 'horizontal' && (
+                      <button onClick={() => { setSplitMode('horizontal'); setFocusedPane(2); if(!openTabs.includes(activeTab2)) setOpenTabs([...openTabs, activeTab2]); }} className={`p-1.5 rounded ${splitMode === 'horizontal' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-700'}`} title="Split Horizontal">
+                        <Rows className="w-4 h-4" />
+                      </button>
+                    )}
+                  </Reorder.Item>
+                ))}
+             </Reorder.Group>
           </div>
           
+          <Reorder.Group axis="x" values={openTabs} onReorder={setOpenTabs} className="flex">
           {openTabs.map(tabId => {
             const tabMeta = TAB_METADATA[tabId];
             return (
-            <div key={tabId} className="relative group flex items-center shrink-0">
+            <Reorder.Item key={tabId} value={tabId} className="relative group flex items-center shrink-0">
               <button
                 onClick={() => {
                    if (focusedPane === 1) setActiveTab(tabId);
                    else setActiveTab2(tabId);
                 }}
-                className={`px-4 sm:px-6 py-4 flex items-center justify-center gap-1 sm:gap-2 transition-colors relative whitespace-nowrap min-w-[120px] ${
+                className={`px-4 sm:px-6 py-4 flex items-center justify-center gap-1 sm:gap-2 transition-colors relative whitespace-nowrap min-w-[120px] cursor-pointer ${
                   (focusedPane === 1 ? activeTab === tabId : activeTab2 === tabId) ? 'text-indigo-400 bg-neutral-800/50' : 'text-neutral-500 hover:text-neutral-300'
                 }`}
               >
@@ -785,8 +1085,9 @@ export function Workspace() {
                    <X className="w-3 h-3"/>
                 </button>
               )}
-            </div>
+            </Reorder.Item>
           )})}
+          </Reorder.Group>
         </div>
       </header>
 
@@ -822,13 +1123,17 @@ export function Workspace() {
             {activeTab === 'data' && <DataView />}
             {activeTab === 'working_agents' && <WorkingAgentsView />}
             {activeTab === 'settings' && <SettingsView />}
-            {activeTab === 'terminal' && <TerminalPanel />}
+            {activeTab === 'terminal' && <CommandLineInterface />}
+            {activeTab === 'health' && <HealthDashboard />}
+            {activeTab === 'deploy' && <DeploymentModule />}
             {activeTab === 'search' && <SearchPanel />}
             {activeTab === 'devices' && <DeviceManager />}
             {activeTab === 'android' && <AndroidBuilderView />}
             {activeTab === 'git' && <GitPanel />}
             {activeTab === 'generative' && <GenerativeCanvas />}
             {activeTab === 'tasks' && <TaskScheduler />}
+            {activeTab === 'recovery' && <RecoveryView />}
+            {activeTab === 'orchestrate' && <OrchestratorMonitor />}
           </div>
 
           {/* PANE 2 */}
@@ -842,18 +1147,21 @@ export function Workspace() {
               {activeTab2 === 'data' && <DataView />}
               {activeTab2 === 'working_agents' && <WorkingAgentsView />}
               {activeTab2 === 'settings' && <SettingsView />}
-              {activeTab2 === 'terminal' && <TerminalPanel />}
+              {activeTab2 === 'terminal' && <CommandLineInterface />}
+              {activeTab2 === 'health' && <HealthDashboard />}
+              {activeTab2 === 'deploy' && <DeploymentModule />}
               {activeTab2 === 'search' && <SearchPanel />}
               {activeTab2 === 'devices' && <DeviceManager />}
               {activeTab2 === 'android' && <AndroidBuilderView />}
               {activeTab2 === 'git' && <GitPanel />}
               {activeTab2 === 'generative' && <GenerativeCanvas />}
               {activeTab2 === 'tasks' && <TaskScheduler />}
+              {activeTab2 === 'recovery' && <RecoveryView />}
+              {activeTab2 === 'orchestrate' && <OrchestratorMonitor />}
             </div>
           )}
         </main>
       </div>
     </div>
   );
-}
 }

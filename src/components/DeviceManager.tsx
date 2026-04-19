@@ -7,6 +7,7 @@ import { useIdeStore } from '../store/ideStore';
 
 export function DeviceManager() {
   const [deviceIp, setDeviceIp] = useState('');
+  const [problemStatement, setProblemStatement] = useState('');
   const [connected, setConnected] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
 

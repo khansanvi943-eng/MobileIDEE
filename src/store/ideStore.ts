@@ -20,7 +20,32 @@ export type ScheduledTask = {
     assignedTo?: string; // Cell ID
     context?: string; // Shared context between cells
     intermediateSteps?: string[];
+    linkedTaskId?: string;
     createdAt: number;
+};
+
+export type AppSnapshot = {
+    id: string;
+    timestamp: number;
+    activeTab: string;
+    activeTab2: string;
+    splitMode: string;
+    taskCount: number;
+    description: string;
+};
+
+export type NetworkStatus = {
+    isConnected: boolean;
+    peerCount: number;
+    lastPublishedAt?: number;
+    meshId: string;
+};
+
+export type Collaborator = {
+    id: string;
+    name: string;
+    color: string;
+    lastActive: number;
 };
 
 export type RuntimeFix = {
@@ -55,6 +80,31 @@ export type DownloadedModel = {
     isLoaded: boolean;
 };
 
+export type AgentPreset = {
+    id: string;
+    name: string;
+    model: string;
+    systemInstruction: string;
+    framework: string;
+    mcpServers: string[];
+    createdAt: number;
+};
+
+export type CellTelemetry = {
+    cpu: number;
+    memory: number;
+    errorRate: number;
+    activeTasks: number;
+};
+
+export type ActiveCell = {
+    id: string;
+    config: AgentPreset;
+    status: 'idle' | 'working' | 'error';
+    currentTask?: string;
+    telemetry: CellTelemetry;
+};
+
 interface IdeState {
     logs: LogEntry[];
     activeModes: string[];
@@ -66,11 +116,19 @@ interface IdeState {
         maxCloudLoad: number;
     };
     tasks: ScheduledTask[];
+    globalTaskContext: string;
     runtimeFixes: RuntimeFix[];
     snippets: CodeSnippet[];
     autoSave: AutoSaveSettings;
     downloadedModels: DownloadedModel[];
     selectedModelId: string | 'auto';
+    snapshots: AppSnapshot[];
+    isUiHealed: boolean;
+    network: NetworkStatus;
+    collaborators: Collaborator[];
+    isLocalMode: boolean;
+    presets: AgentPreset[];
+    activeCells: ActiveCell[];
     
     // Actions
     addLog: (message: string, source?: LogEntry['source'], level?: LogEntry['level']) => void;
@@ -84,6 +142,7 @@ interface IdeState {
     addTask: (task: Omit<ScheduledTask, 'id' | 'createdAt' | 'status'>) => void;
     updateTask: (id: string, updates: Partial<ScheduledTask>) => void;
     shareContext: (taskId: string, newContext: string, step?: string) => void;
+    setGlobalTaskContext: (context: string) => void;
     
     addRuntimeFix: (fix: Omit<RuntimeFix, 'id' | 'timestamp'>) => void;
     
@@ -99,6 +158,21 @@ interface IdeState {
     addDownloadedModel: (model: DownloadedModel) => void;
     setSelectedModel: (id: string | 'auto') => void;
     toggleModelLoad: (id: string) => void;
+    
+    // Self-healing
+    createSnapshot: (description: string, activeTab: string, activeTab2: string, splitMode: string) => void;
+    revertToSnapshot: (snapshotId: string) => void;
+    setUiHealed: (healed: boolean) => void;
+    updateNetwork: (updates: Partial<NetworkStatus>) => void;
+    syncFromRemote: (data: Partial<IdeState>) => void;
+    setLocalMode: (enabled: boolean) => void;
+    
+    // Agent Management
+    addPreset: (preset: Omit<AgentPreset, 'id' | 'createdAt'>) => void;
+    deletePreset: (id: string) => void;
+    spawnCell: (config: AgentPreset) => void;
+    updateCell: (id: string, updates: Partial<ActiveCell>) => void;
+    terminateCell: (id: string) => void;
 }
 
 export const useIdeStore = create<IdeState>((set) => ({
@@ -115,6 +189,7 @@ export const useIdeStore = create<IdeState>((set) => ({
         maxCloudLoad: 80,
     },
     tasks: [],
+    globalTaskContext: "",
     runtimeFixes: [],
     snippets: [
         { id: '1', name: 'React Typed Memo', content: 'const Component = React.memo(({ children }: Props) => {\n  return <div>{children}</div>;\n});', category: 'React', usageCount: 0 },
@@ -132,6 +207,20 @@ export const useIdeStore = create<IdeState>((set) => ({
         { id: 'edge-2', name: 'LiteRT-Phi-3', version: '2.0.0', size: '2.1GB', path: '/models/phi3.tflite', type: 'tflite', isLoaded: false }
     ],
     selectedModelId: 'auto',
+    snapshots: [],
+    isUiHealed: false,
+    network: {
+        isConnected: false,
+        peerCount: 0,
+        meshId: 'local-node-' + uuidv4().slice(0, 4),
+    },
+    collaborators: [],
+    isLocalMode: false,
+    presets: [
+        { id: 'default-pro', name: 'OpenClaw Pro', model: 'gemini-3.1-pro-preview', framework: 'OpenClaw', systemInstruction: 'You are a deep engineering cell.', mcpServers: ['filesystem', 'terminal'], createdAt: Date.now() },
+        { id: 'default-flash', name: 'Fast Research', model: 'gemini-3-flash-preview', framework: 'SearchAgent', systemInstruction: 'Gather real-time web data.', mcpServers: ['google-search'], createdAt: Date.now() }
+    ],
+    activeCells: [],
 
     addLog: (message, source = 'system', level = 'info') => set((state) => ({
         logs: [...state.logs, { id: uuidv4(), timestamp: Date.now(), message, source, level }]
@@ -175,6 +264,8 @@ export const useIdeStore = create<IdeState>((set) => ({
         })
     })),
     
+    setGlobalTaskContext: (globalTaskContext) => set({ globalTaskContext }),
+    
     addRuntimeFix: (fix) => set((state) => ({
         runtimeFixes: [...state.runtimeFixes, { ...fix, id: uuidv4(), timestamp: Date.now() }]
     })),
@@ -203,5 +294,69 @@ export const useIdeStore = create<IdeState>((set) => ({
 
     toggleModelLoad: (id) => set((state) => ({
         downloadedModels: state.downloadedModels.map(m => m.id === id ? { ...m, isLoaded: !m.isLoaded } : m)
+    })),
+
+    createSnapshot: (description, activeTab, activeTab2, splitMode) => set((state) => {
+        const newSnapshot: AppSnapshot = {
+            id: uuidv4(),
+            timestamp: Date.now(),
+            activeTab,
+            activeTab2,
+            splitMode,
+            taskCount: state.tasks.length,
+            description
+        };
+        // Keep only last 10 snapshots
+        const snapshots = [newSnapshot, ...state.snapshots].slice(0, 10);
+        return { snapshots };
+    }),
+
+    revertToSnapshot: (snapshotId) => set((state) => {
+        const snapshot = state.snapshots.find(s => s.id === snapshotId);
+        if (!snapshot) return state;
+        
+        // In a real revert we'd need to notify Workspace or update Workspace state
+        // For now we just log it and mark UI as recovering
+        return { 
+            isUiHealed: false // Reset health check
+        };
+    }),
+
+    setUiHealed: (healed) => set({ isUiHealed: healed }),
+
+    updateNetwork: (updates) => set((state) => ({
+        network: { ...state.network, ...updates }
+    })),
+
+    syncFromRemote: (data) => set((state) => ({
+        ...state,
+        ...data
+    })),
+
+    setLocalMode: (enabled) => set({ isLocalMode: enabled }),
+
+    addPreset: (preset) => set((state) => ({
+        presets: [...state.presets, { ...preset, id: uuidv4(), createdAt: Date.now() }]
+    })),
+
+    deletePreset: (id) => set((state) => ({
+        presets: state.presets.filter(p => p.id !== id)
+    })),
+
+    spawnCell: (config) => set((state) => ({
+        activeCells: [...state.activeCells, {
+            id: 'cell-' + uuidv4().slice(0, 8),
+            config,
+            status: 'idle',
+            telemetry: { cpu: 0, memory: 0, errorRate: 0, activeTasks: 0 }
+        }]
+    })),
+
+    updateCell: (id, updates) => set((state) => ({
+        activeCells: state.activeCells.map(c => c.id === id ? { ...c, ...updates } : c)
+    })),
+
+    terminateCell: (id) => set((state) => ({
+        activeCells: state.activeCells.filter(c => c.id !== id)
     }))
 }));

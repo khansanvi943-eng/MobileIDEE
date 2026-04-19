@@ -47,6 +47,57 @@
         "createdAt": { "type": "integer" }
       },
       "required": ["id", "workspaceId", "senderId", "role", "content", "createdAt"]
+    },
+    "Cell": {
+      "title": "Cell",
+      "description": "A configured AI worker unit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "framework": { "type": "string", "enum": ["dify", "mastra", "autogen", "crewai", "langgraph", "goose"] },
+        "model": { "type": "string" },
+        "mcpServers": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string" },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
+        "loyalty": { "type": "string" },
+        "stealth": { "type": "boolean", "description": "Is invisible to target device user" }
+      }
+    },
+    "CellKnowledge": {
+      "title": "CellKnowledge",
+      "description": "Historical data on best cell configurations for tasks",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "taskSignature": { "type": "string" },
+        "bestConfig": { "type": "object" },
+        "successScore": { "type": "number" },
+        "lastUsed": { "type": "integer" }
+      }
+    },
+    "NetworkSession": {
+      "title": "NetworkSession",
+      "description": "A group discussion session for active cells",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "workspaceId": { "type": "string" },
+        "activeCellIds": { "type": "array", "items": { "type": "string" } },
+        "chatHistory": { "type": "array", "items": { "type": "object" } },
+        "knowledgeBaseId": { "type": "string" }
+      }
+    },
+    "CentralKnowledge": {
+      "title": "CentralKnowledge",
+      "description": "Shared repository of all cell discussions and technical findings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "workspaceId": { "type": "string" },
+        "rawContext": { "type": "string" },
+        "distilledInsights": { "type": "array", "items": { "type": "string" } },
+        "contextKeeperId": { "type": "string", "description": "ID of the cell managing this knowledge" }
+      }
     }
   },
   "firestore": {
@@ -61,6 +112,22 @@
     "workspaces/{workspaceId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/Message" },
       "description": "Messages inside a workspace"
+    },
+    "cells/{cellId}": {
+      "schema": { "$ref": "#/entities/Cell" },
+      "description": "Active cells"
+    },
+    "cell_knowledge/{knowledgeId}": {
+      "schema": { "$ref": "#/entities/CellKnowledge" },
+      "description": "Learned cell configurations"
+    },
+    "network_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/NetworkSession" },
+      "description": "Active cell group chats"
+    },
+    "central_knowledge/{knowledgeId}": {
+      "schema": { "$ref": "#/entities/CentralKnowledge" },
+      "description": "Shared group knowledge"
     }
   }
 }

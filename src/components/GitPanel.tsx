@@ -123,7 +123,7 @@ export const GitPanel: React.FC = () => {
                model: 'gemini-3.1-flash-preview',
                contents: `Generate a concise, professional Git commit message based on the following diff and status. Only output the commit message string, nothing else. Do not use markdown blocks.\n\n${fullDiff}`
             });
-            const generatedMsg = response.text()?.trim().replace(/^["']|["']$/g, '');
+            const generatedMsg = response.text?.trim().replace(/^["']|["']$/g, '');
             if (!generatedMsg) {
                 throw new Error("Failed to generate message from AI.");
             }
