@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useAuth } from "./lib/AuthContext";
 import { 
-  Send, Bot, Database, Activity, RefreshCw, X, Plus, CheckCircle, ShieldAlert, Image as ImageIcon
+  Send, Bot, Database, Activity, RefreshCw, X, Plus, CheckCircle, ShieldAlert, Image as ImageIcon, QrCode
 } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import Markdown from "react-markdown";
@@ -16,11 +16,12 @@ import { SearchPanel } from "./components/SearchPanel";
 import { GitPanel } from "./components/GitPanel";
 import { GenerativeCanvas } from "./components/GenerativeCanvas";
 import { FileExplorer } from "./components/FileExplorer";
+import { TaskScheduler } from "./components/TaskScheduler";
 import { 
-  Network, TerminalSquare, Search, Smartphone, Settings, LayoutGrid, HardDrive, ShieldCheck, SmartphoneCharging, GitBranch, Columns, Rows, FolderOpen
+  Network, TerminalSquare, Search, Smartphone, Settings, LayoutGrid, HardDrive, ShieldCheck, SmartphoneCharging, GitBranch, Columns, Rows, FolderOpen, ListTodo
 } from "lucide-react";
 
-type TabState = 'chat' | 'models' | 'data' | 'working_agents' | 'terminal' | 'search' | 'devices' | 'settings' | 'android' | 'git' | 'generative';
+type TabState = 'chat' | 'models' | 'data' | 'working_agents' | 'terminal' | 'search' | 'devices' | 'settings' | 'android' | 'git' | 'generative' | 'tasks';
 
 const TAB_METADATA: Record<TabState, { label: string, icon: any }> = {
   chat: { label: 'Console', icon: Activity },
@@ -33,7 +34,8 @@ const TAB_METADATA: Record<TabState, { label: string, icon: any }> = {
   git: { label: 'Source Control', icon: GitBranch },
   devices: { label: 'Devices', icon: Smartphone },
   settings: { label: 'Settings', icon: Settings },
-  android: { label: 'Android Build', icon: SmartphoneCharging }
+  android: { label: 'Android Build', icon: SmartphoneCharging },
+  tasks: { label: 'Tasks', icon: ListTodo }
 };
 
 type Message = {
@@ -640,7 +642,11 @@ export function Workspace() {
     </div>
   );
 
-  const AndroidBuilderView = () => (
+  const AndroidBuilderView = () => {
+    const [isPairing, setIsPairing] = useState(false);
+    const [isPaired, setIsPaired] = useState(false);
+
+    return (
     <div className="flex flex-col h-full bg-neutral-950 text-white overflow-y-auto p-4 sm:p-6 pb-24">
       <div className="max-w-3xl mx-auto w-full space-y-6">
         <div>
@@ -651,15 +657,34 @@ export function Workspace() {
           <p className="text-sm text-neutral-400">Snapshot current agent capabilities into a Kotlin Android Studio project using AI Edge SDK. Autodeploys and debugs via ADB.</p>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
            <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl space-y-4">
               <h3 className="font-semibold text-indigo-400 flex items-center gap-2"><HardDrive className="w-4 h-4"/> Remote ADB Status</h3>
               <div className="flex justify-between text-xs text-neutral-500">
                  <span>Connection</span>
-                 <span className="text-amber-400">Awaiting Wireless Bind...</span>
+                 <span className={isPaired ? "text-emerald-400" : "text-amber-400"}>{isPaired ? "Paired" : "Awaiting Wireless Bind..."}</span>
               </div>
-              <button className="w-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/50 hover:bg-indigo-600/40 rounded-md py-2 text-sm transition-all text-center">
-                 Initialize Remote ADB
+              <button 
+                disabled={isPairing || isPaired}
+                onClick={() => {
+                   setIsPairing(true);
+                   addStoreLog("[Android Cell] Opening secure QR pairing channel...", "cell", "info");
+                   setTimeout(() => {
+                        addStoreLog("[Scanner] QR code generated. Scan with Android Device.", "cell", "info");
+                        setTimeout(() => {
+                           setIsPairing(false);
+                           setIsPaired(true);
+                           addStoreLog("[Scanner] Successfully paired with Android device.", "cell", "success");
+                           addStoreLog("[ADB Sandbox] Auto-starting deployment process...", "cell", "info");
+                           setTimeout(() => {
+                               addStoreLog("[Android Cell] Snapshotting logic. Generating Kotlin/Edge source code...", "cell", "info");
+                               setTimeout(() => addStoreLog("[ADB Sandbox] Simulating signed APK build without Play Protect restrictions...", "system", "warning"), 1500);
+                           }, 1000);
+                        }, 2000);
+                   }, 1000);
+                }}
+                className="w-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/50 hover:bg-indigo-600/40 rounded-md py-2 text-sm transition-all text-center flex items-center justify-center gap-2">
+                 <QrCode className="w-4 h-4"/> {isPairing ? "Pairing..." : "Pair via QR"}
               </button>
            </div>
            
@@ -676,7 +701,22 @@ export function Workspace() {
                  Generate Signed APK & Deploy
               </button>
            </div>
+           
+           <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl space-y-4">
+              <h3 className="font-semibold text-amber-400 flex items-center gap-2"><Smartphone className="w-4 h-4"/> Wireless Debug</h3>
+              <div className="flex justify-between text-xs text-neutral-500">
+                 <span>Debug Mode</span>
+                 <span>{isPaired ? "Active" : "Disabled"}</span>
+              </div>
+              <button 
+                disabled={!isPaired}
+                className="w-full bg-amber-600/20 text-amber-400 border border-amber-500/50 hover:bg-amber-600/40 rounded-md py-2 text-sm transition-all text-center disabled:opacity-50">
+                 Start Debug Bridge
+              </button>
+           </div>
         </div>
+// ... (rest of the view remains)
+
 
         <div className="mt-6 border border-neutral-800 rounded-xl bg-neutral-950 overflow-hidden">
            <div className="bg-neutral-900 border-b border-neutral-800 p-2 px-4 flex justify-between items-center text-xs font-mono text-neutral-500">
@@ -691,7 +731,7 @@ export function Workspace() {
       </div>
     </div>
   );
-
+  
   return (
     <div className="flex flex-col h-screen w-full bg-black overflow-hidden font-sans">
       {/* Top Mobile-Friendly Header Tabs */}
@@ -788,6 +828,7 @@ export function Workspace() {
             {activeTab === 'android' && <AndroidBuilderView />}
             {activeTab === 'git' && <GitPanel />}
             {activeTab === 'generative' && <GenerativeCanvas />}
+            {activeTab === 'tasks' && <TaskScheduler />}
           </div>
 
           {/* PANE 2 */}
@@ -807,10 +848,12 @@ export function Workspace() {
               {activeTab2 === 'android' && <AndroidBuilderView />}
               {activeTab2 === 'git' && <GitPanel />}
               {activeTab2 === 'generative' && <GenerativeCanvas />}
+              {activeTab2 === 'tasks' && <TaskScheduler />}
             </div>
           )}
         </main>
       </div>
     </div>
   );
+}
 }

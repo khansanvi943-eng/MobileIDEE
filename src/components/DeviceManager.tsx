@@ -99,20 +99,27 @@ export function DeviceManager() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-4 flex-shrink-0">
-        <div className="col-span-1 lg:col-span-2 flex gap-2">
+      <div className="grid grid-cols-1 gap-4 mb-4 flex-shrink-0">
+         <div className="flex gap-2 flex-col md:flex-row">
           <Input 
             value={deviceIp} 
             onChange={(e) => setDeviceIp(e.target.value)} 
-            placeholder="Remote Cell ID (Leave blank to bind Self)"
-            className="bg-neutral-900 border-neutral-800 font-mono text-sm"
+            placeholder="Remote Cell ID"
+            className="bg-neutral-900 border-neutral-800 font-mono text-sm flex-1"
             disabled={connected}
           />
+          <textarea 
+            value={problemStatement}
+            onChange={(e) => setProblemStatement(e.target.value)}
+            placeholder="Problem statement for device..."
+            className="bg-neutral-900 border border-neutral-800 rounded-md p-2 text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 font-mono flex-1 min-h-[40px]"
+            rows={1}
+          />
           <Button onClick={scanAndBind} disabled={connected} className="bg-cyan-700 hover:bg-cyan-600 text-white whitespace-nowrap transition-all shadow-[0_0_15px_rgba(8,145,178,0.3)]">
-            <Activity className="w-4 h-4 mr-2" /> Bind OpenClaw Cell
+            <Activity className="w-4 h-4 mr-2" /> Bind Cell
           </Button>
         </div>
-        <div className="col-span-1 lg:col-span-2 flex gap-2 lg:justify-end">
+        <div className="flex gap-2 flex-wrap justify-end">
            <Button variant="outline" onClick={() => {
               addLog('[Downloader] Starting fast-pull of gemma2-2b-it-gpu-int8.bin via CDN...');
               setTimeout(() => addLog('[Runtime Setup] Pre-allocating INT8 weights to GPU VRAM contexts...'), 1000);
