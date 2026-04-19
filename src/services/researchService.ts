@@ -21,8 +21,10 @@ export class ResearchService {
         config: {
           tools: [{ googleSearch: {} }],
           toolConfig: {
+            includeServerSideToolInvocations: true,
+            include_server_side_tool_invocations: true,
             functionCallingConfig: {
-              include_server_side_tool_invocations: true
+              mode: 'AUTO'
             }
           } as any,
           systemInstruction: "You are a professional research agent. Your goal is to provide deep, factual, and technical context from the live web to support complex task execution."

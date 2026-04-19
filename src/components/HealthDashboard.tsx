@@ -1,14 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Activity, Heart, ShieldAlert, Zap, Globe, 
-  Cpu, HardDrive, Network, AlertTriangle, CheckCircle2 
+  Cpu, HardDrive, Network, AlertTriangle, CheckCircle2,
+  Search, RefreshCw, ShieldCheck, AlertCircle, CheckCircle
 } from 'lucide-react';
 import { useIdeStore } from '../store/ideStore';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Button } from '@/components/ui/button';
+import { systemDiagnostics, TestResult } from '../services/systemDiagnostics';
 
 export function HealthDashboard() {
   const { logs, network, tasks, isUiHealed, runtimeFixes } = useIdeStore();
   const [metrics, setMetrics] = useState<{ time: string, load: number, mesh: number }[]>([]);
+  const [diagResults, setDiagResults] = useState<TestResult[]>([]);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
+  const [fixMsg, setFixMsg] = useState("");
 
   useEffect(() => {
     const generateMetrics = () => {
@@ -25,23 +31,83 @@ export function HealthDashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  const runTests = async () => {
+    setIsDiagnosing(true);
+    setFixMsg("");
+    const results = await systemDiagnostics.runFullSuite();
+    setDiagResults(results);
+    setIsDiagnosing(false);
+  };
+
+  const handleFix = async () => {
+    const failures = diagResults.filter(r => !r.success);
+    const msg = await systemDiagnostics.fixLifecycle(failures);
+    setFixMsg(msg);
+    await runTests();
+  };
+
   const errorCount = logs.filter(l => l.level === 'error').length;
-  const activeTasks = tasks.filter(t => t.status === 'working').length;
 
   return (
-    <div className="flex flex-col h-full bg-neutral-950 p-6 space-y-6 overflow-y-auto font-sans text-neutral-100">
+    <div className="flex flex-col h-full bg-neutral-950 p-6 space-y-6 overflow-y-auto font-sans text-neutral-100 custom-scrollbar">
       <div className="flex items-center justify-between shrink-0">
         <div>
            <h2 className="text-xl font-bold flex items-center gap-2 text-indigo-400 uppercase tracking-tight">
               <Zap className="w-6 h-6 fill-current" /> System Health Nexus
            </h2>
-           <p className="text-xs text-neutral-500 font-mono">Real-time telemetry and network mesh diagnostic</p>
+           <p className="text-xs text-neutral-500 font-mono">Autonomous heartbeat and functional mesh diagnostics</p>
         </div>
-        <div className={`px-4 py-1.5 rounded-lg border flex items-center gap-2 text-xs font-bold uppercase transition-all ${isUiHealed ? 'bg-emerald-950/20 border-emerald-500/50 text-emerald-400' : 'bg-indigo-950/20 border-indigo-500/50 text-indigo-400'}`}>
-           <ShieldAlert className="w-4 h-4" /> 
-           {isUiHealed ? 'UI Stabilized (Self-Healed)' : 'Core Systems: Operational'}
+        <div className="flex items-center gap-3">
+           <Button 
+             onClick={runTests} 
+             disabled={isDiagnosing}
+             size="sm"
+             className="bg-indigo-600 hover:bg-indigo-500 text-xs px-4"
+           >
+              {isDiagnosing ? <RefreshCw className="w-3 h-3 mr-2 animate-spin" /> : <ShieldCheck className="w-3 h-3 mr-2" />}
+              {isDiagnosing ? 'Analyzing...' : 'Run Diagnostics'}
+           </Button>
+           <div className={`px-4 py-1.5 rounded-lg border flex items-center gap-2 text-xs font-bold uppercase transition-all ${isUiHealed ? 'bg-emerald-950/20 border-emerald-500/50 text-emerald-400' : 'bg-indigo-950/20 border-indigo-500/50 text-indigo-400'}`}>
+              <ShieldAlert className="w-4 h-4" /> 
+              {isUiHealed ? 'UI Stabilized' : 'Mesh Active'}
+           </div>
         </div>
       </div>
+
+      {fixMsg && (
+        <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-sm flex items-center gap-3 animate-in slide-in-from-top-2">
+          <CheckCircle className="w-5 h-5 flex-shrink-0" />
+          {fixMsg}
+        </div>
+      )}
+
+      {diagResults.length > 0 && (
+         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-2">
+            {diagResults.map(res => (
+              <div key={res.functionId} className="p-3 bg-neutral-900 border border-neutral-800 rounded-xl flex items-start gap-3 transition-all">
+                 <div className={`p-1.5 rounded-lg ${res.success ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                   {res.success ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                 </div>
+                 <div className="flex-1 min-w-0">
+                    <div className="font-bold text-xs text-neutral-200 truncate">{res.name}</div>
+                    <div className="text-[9px] text-neutral-500 uppercase tracking-widest font-mono truncate">{res.functionId}</div>
+                 </div>
+              </div>
+            ))}
+            {diagResults.some(r => !r.success) && (
+              <div className="md:col-span-2 lg:col-span-3 flex justify-center py-2">
+                 <Button 
+                   onClick={handleFix} 
+                   size="sm"
+                   variant="outline"
+                   className="border-amber-700 text-amber-400 hover:bg-amber-900/40 hover:text-amber-300 text-[10px]"
+                 >
+                    <Zap className="w-3 h-3 mr-2" /> Trigger Autonomous Fix Lifecycle
+                 </Button>
+              </div>
+            )}
+         </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 shrink-0">
          {[

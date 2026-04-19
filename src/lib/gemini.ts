@@ -37,8 +37,10 @@ export const createAgentChat = (modelName: string, systemInstruction: string, to
       systemInstruction,
       tools: tools && tools.length > 0 ? tools : undefined,
       toolConfig: tools && tools.length > 0 ? {
+        includeServerSideToolInvocations: true,
+        include_server_side_tool_invocations: true,
         functionCallingConfig: {
-          include_server_side_tool_invocations: true
+          mode: 'AUTO'
         }
       } as any : undefined
     }

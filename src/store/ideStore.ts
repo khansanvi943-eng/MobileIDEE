@@ -188,7 +188,16 @@ export const useIdeStore = create<IdeState>((set) => ({
         costSaving: false,
         maxCloudLoad: 80,
     },
-    tasks: [],
+    tasks: [
+        {
+            id: uuidv4(),
+            prompt: "Research best AI model for 'code generation' and 'UI development' with specific focus on React performance and syntax highlighting.",
+            priority: 'high',
+            isRecurring: false,
+            status: 'pending',
+            createdAt: Date.now()
+        }
+    ],
     globalTaskContext: "",
     runtimeFixes: [],
     snippets: [
@@ -343,20 +352,42 @@ export const useIdeStore = create<IdeState>((set) => ({
         presets: state.presets.filter(p => p.id !== id)
     })),
 
-    spawnCell: (config) => set((state) => ({
-        activeCells: [...state.activeCells, {
-            id: 'cell-' + uuidv4().slice(0, 8),
-            config,
-            status: 'idle',
-            telemetry: { cpu: 0, memory: 0, errorRate: 0, activeTasks: 0 }
-        }]
-    })),
+    spawnCell: (config) => set((state) => {
+        const id = 'cell-' + uuidv4().slice(0, 8);
+        const logMsg = `[System] Spawned new AI Cell: ${config.name} (${id})`;
+        return {
+            activeCells: [...state.activeCells, {
+                id,
+                config,
+                status: 'idle',
+                telemetry: { cpu: 0, memory: 0, errorRate: 0, activeTasks: 0 }
+            }],
+            logs: [...state.logs, { id: uuidv4(), timestamp: Date.now(), message: logMsg, source: 'system' as const, level: 'info' as const }]
+        };
+    }),
 
-    updateCell: (id, updates) => set((state) => ({
-        activeCells: state.activeCells.map(c => c.id === id ? { ...c, ...updates } : c)
-    })),
+    updateCell: (id, updates) => set((state) => {
+        let logMsg = "";
+        const cell = state.activeCells.find(c => c.id === id);
+        if (cell) {
+            if (updates.status && updates.status !== cell.status) {
+                logMsg = `[System] Cell ${id} status changed: ${cell.status} -> ${updates.status}`;
+            }
+            if (updates.currentTask && updates.currentTask !== cell.currentTask) {
+                logMsg = `[System] Cell ${id} executing task: ${updates.currentTask.slice(0, 50)}...`;
+            }
+        }
+
+        const nextLogs = logMsg ? [...state.logs, { id: uuidv4(), timestamp: Date.now(), message: logMsg, source: 'system' as const, level: 'info' as const }] : state.logs;
+
+        return {
+            activeCells: state.activeCells.map(c => c.id === id ? { ...c, ...updates } : c),
+            logs: nextLogs
+        };
+    }),
 
     terminateCell: (id) => set((state) => ({
-        activeCells: state.activeCells.filter(c => c.id !== id)
+        activeCells: state.activeCells.filter(c => c.id !== id),
+        logs: [...state.logs, { id: uuidv4(), timestamp: Date.now(), message: `[System] Terminated AI Cell: ${id}`, source: 'system' as const, level: 'warning' as const }]
     }))
 }));

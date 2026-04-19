@@ -6,6 +6,8 @@ import {
 import { Reorder } from "motion/react";
 import { v4 as uuidv4 } from "uuid";
 import Markdown from "react-markdown";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useIdeStore } from "./store/ideStore";
 import { Button } from "@/components/ui/button";
 import { getAI, MODELS, createAgentChat, TERMINAL_TOOL, FILESYSTEM_TOOL } from "./lib/gemini";
@@ -25,7 +27,7 @@ import { HealthDashboard } from "./components/HealthDashboard";
 import { DeploymentModule } from "./components/DeploymentModule";
 import { io, Socket } from "socket.io-client";
 import { 
-  Network, TerminalSquare, Search, Smartphone, Settings, LayoutGrid, HardDrive, ShieldCheck, SmartphoneCharging, GitBranch, Columns, Rows, FolderOpen, ListTodo, History, Cpu, Zap, Package, Users, Trash2, Boxes
+  Network, TerminalSquare, Search, Smartphone, Settings, LayoutGrid, HardDrive, ShieldCheck, SmartphoneCharging, GitBranch, Columns, Rows, FolderOpen, ListTodo, History, Cpu, Zap, Package, Users, Trash2, Boxes, Copy
 } from "lucide-react";
 
 type TabState = 'chat' | 'models' | 'data' | 'working_agents' | 'terminal' | 'search' | 'devices' | 'settings' | 'android' | 'git' | 'generative' | 'tasks' | 'recovery' | 'orchestrate' | 'health' | 'deploy';
@@ -59,6 +61,8 @@ type Message = {
     originalContent?: string;
   };
 };
+
+import { handleFirestoreError } from "./lib/firestoreUtils";
 
 export function Workspace() {
   const { user } = useAuth();
@@ -141,10 +145,31 @@ export function Workspace() {
   const terminateCell = useIdeStore(s => s.terminateCell);
   const isLocalMode = useIdeStore(s => s.isLocalMode);
   const setLocalMode = useIdeStore(s => s.setLocalMode);
+  const network = useIdeStore(s => s.network);
+  const [workspaceId] = useState(() => uuidv4());
 
   useEffect(() => {
+    // Persist NetworkStatus and Model Selection
     localStorage.setItem('openagentsSelectedModel', selectedModel);
+    useIdeStore.getState().setSelectedModel(selectedModel);
   }, [selectedModel]);
+
+  useEffect(() => {
+    // Watch for network status changes and persist to Firestore
+    if (user?.uid) {
+      setDoc(doc(db, "network_status", "mesh_global"), {
+        ...network,
+        updatedAt: Date.now(),
+        meshId: network.meshId || workspaceId
+      }, { merge: true }).catch(err => {
+        try {
+          handleFirestoreError(err, 'write', 'network_status/mesh_global');
+        } catch (handledErr: any) {
+          console.error("Network sync fail:", handledErr.message);
+        }
+      });
+    }
+  }, [network, user?.uid, workspaceId]);
 
   useEffect(() => {
     localStorage.setItem('openagentsModels', JSON.stringify(models));
@@ -154,8 +179,6 @@ export function Workspace() {
   const addStoreLog = useIdeStore((s) => s.addLog);
   const chatEndRef = useRef<HTMLDivElement>(null);
   
-  const [workspaceId] = useState(() => uuidv4());
-
   useEffect(() => {
     if (user?.uid) {
       setDoc(doc(db, "workspaces", workspaceId), {
@@ -171,7 +194,6 @@ export function Workspace() {
   }, [user?.uid, workspaceId, addStoreLog]);
 
   const createSnapshot = useIdeStore(s => s.createSnapshot);
-  const network = useIdeStore(s => s.network);
   const updateNetwork = useIdeStore(s => s.updateNetwork);
   const collaborators = useIdeStore(s => s.collaborators);
   const socketRef = useRef<Socket | null>(null);
@@ -415,8 +437,41 @@ export function Workspace() {
                   )}
                 </div>
               )}
-              <div className="prose prose-invert max-w-none prose-sm sm:prose-base">
-                <Markdown>{m.content}</Markdown>
+              <div className="prose prose-invert max-w-none prose-sm sm:prose-base prose-pre:bg-transparent prose-pre:p-0">
+                <Markdown
+                   components={{
+                      code(props) {
+                        const {children, className, ...rest} = props
+                        const match = /language-(\w+)/.exec(className || '')
+                        return match ? (
+                          <div className="relative group/code rounded-lg overflow-hidden border border-neutral-700/50 my-4">
+                            <div className="bg-neutral-900 px-4 py-1.5 flex justify-between items-center border-b border-neutral-700/30">
+                              <span className="text-[10px] font-mono text-neutral-500 uppercase">{match[1]}</span>
+                              <button 
+                                onClick={() => navigator.clipboard.writeText(String(children).replace(/\n$/, ''))}
+                                className="text-neutral-500 hover:text-indigo-400 transition-colors"
+                              >
+                                <Copy className="w-3 h-3" />
+                              </button>
+                            </div>
+                            <SyntaxHighlighter
+                              PreTag="div"
+                              children={String(children).replace(/\n$/, '')}
+                              language={match[1]}
+                              style={oneDark as any}
+                              customStyle={{ margin: 0, borderRadius: 0, padding: '1rem', fontSize: '13px' }}
+                            />
+                          </div>
+                        ) : (
+                          <code {...rest} className={className}>
+                            {children}
+                          </code>
+                        )
+                      }
+                    }}
+                >
+                  {m.content}
+                </Markdown>
               </div>
             </div>
           </div>
@@ -594,9 +649,23 @@ export function Workspace() {
         )}
 
         <div className="space-y-6">
-          <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
-             <Package className="w-4 h-4" /> Configuration Presets
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-widest flex items-center gap-2">
+               <Package className="w-4 h-4" /> Configuration Presets
+            </h3>
+            <div className="flex items-center gap-3 bg-neutral-900 border border-neutral-800 px-3 py-1.5 rounded-lg">
+               <span className="text-[10px] text-neutral-500 font-bold uppercase">Global Default</span>
+               <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="bg-transparent border-none text-xs text-indigo-400 focus:ring-0 cursor-pointer outline-none"
+               >
+                 {models.map(m => (
+                   <option key={m.id} value={m.id} className="bg-neutral-900 text-white">{m.name}</option>
+                 ))}
+               </select>
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
              {presets.map(preset => (
                <div key={preset.id} className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl hover:border-indigo-900/50 transition-all group relative">

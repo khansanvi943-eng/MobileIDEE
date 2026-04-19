@@ -91,6 +91,16 @@ service cloud.firestore {
         && data.keys().size() <= 6;
     }
 
+    function isValidNetworkStatus(data) {
+      return data.keys().hasAll(['isConnected', 'peerCount', 'meshId', 'updatedAt'])
+        && data.isConnected is bool
+        && data.peerCount is int
+        && data.meshId is string && data.meshId.size() <= 128
+        && data.updatedAt is int
+        && (!data.keys().hasAny(['lastPublishedAt']) || data.lastPublishedAt is int)
+        && data.keys().size() <= 5;
+    }
+
     // --- Match Groups ---
 
     match /users/{userId} {
@@ -155,6 +165,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/workspaces/$(existing().workspaceId)).data.ownerId == request.auth.uid
         && incoming().workspaceId == existing().workspaceId
         && incoming().diff(existing()).affectedKeys().hasOnly(['rawContext', 'distilledInsights', 'contextKeeperId']);
+    }
+
+    match /network_status/{statusId} {
+      allow get: if isVerified();
+      allow create, update: if isVerified() && isValidId(statusId) && isValidNetworkStatus(incoming());
     }
   }
 }

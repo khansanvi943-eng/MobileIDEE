@@ -98,6 +98,19 @@
         "distilledInsights": { "type": "array", "items": { "type": "string" } },
         "contextKeeperId": { "type": "string", "description": "ID of the cell managing this knowledge" }
       }
+    },
+    "NetworkStatus": {
+      "title": "NetworkStatus",
+      "description": "Global mesh health and status",
+      "type": "object",
+      "properties": {
+        "isConnected": { "type": "boolean" },
+        "peerCount": { "type": "integer" },
+        "lastPublishedAt": { "type": "integer" },
+        "meshId": { "type": "string" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["isConnected", "peerCount", "meshId", "updatedAt"]
     }
   },
   "firestore": {
@@ -128,6 +141,10 @@
     "central_knowledge/{knowledgeId}": {
       "schema": { "$ref": "#/entities/CentralKnowledge" },
       "description": "Shared group knowledge"
+    },
+    "network_status/{statusId}": {
+      "schema": { "$ref": "#/entities/NetworkStatus" },
+      "description": "Global mesh synchronization points"
     }
   }
 }
