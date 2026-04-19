@@ -126,6 +126,8 @@ export const useIdeStore = create<IdeState>((set) => ({
         strategy: 'interval'
     },
     downloadedModels: [
+        { id: 'edge-watcher-100m', name: 'Watcher Cell (Edge Gallery 100M)', version: '1.0', size: '120MB', path: '/models/watcher-100m.tflite', type: 'tflite', isLoaded: true },
+        { id: 'edge-fixer-7b', name: 'Autonomous Fixer (Open Source 7B)', version: 'latest', size: '4.2GB', path: '/models/fixer-uncensored-7b.gguf', type: 'lite-rt', isLoaded: false },
         { id: 'edge-1', name: 'LiteRT-Gemma-2b', version: '1.2.0', size: '1.4GB', path: '/models/gemma2b.tflite', type: 'tflite', isLoaded: true },
         { id: 'edge-2', name: 'LiteRT-Phi-3', version: '2.0.0', size: '2.1GB', path: '/models/phi3.tflite', type: 'tflite', isLoaded: false }
     ],

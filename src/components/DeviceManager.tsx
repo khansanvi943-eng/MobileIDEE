@@ -158,14 +158,16 @@ export function DeviceManager() {
            Decentralized Hive Mind connected to OpenAgents Org <span className="font-bold text-indigo-400 pl-1">AgentOrganism</span>. Local cells orchestrate open source MCPs independently syncing logic muscles collaboratively in background.
         </div>
         <div className="flex gap-2">
-           <Button variant="ghost" size="sm" className="h-7 text-neutral-400 hover:text-cyan-300 hover:bg-neutral-800 transition-colors" onClick={() => {
-               addLog('[Cell Action] Auto-deploying common self-teaching memory logic tools to MCP config...');
-               setTimeout(() => addLog('[Bloodstream Sync] OpenAgents MCP network injected with autonomous learning modules successfully.'), 1200);
+           <Button variant="ghost" size="sm" className="h-7 text-neutral-400 hover:text-emerald-300 hover:bg-neutral-800 transition-colors" onClick={() => {
+               addLog('[Cell Action] Auto-deploying silent 100M Watcher Cell to background process...');
+               setTimeout(() => addLog('[Bloodstream Sync] 100M Watcher active: Auto-scaling down local resources. Monitoring runtime for errors...'), 1200);
+               setTimeout(() => addLog('[Watcher] Detected large context task. Scaling up to 7B Autonomous Fixer in background...'), 3500);
+               setTimeout(() => addLog('[Fixer Network] OpenAgent cells connected: Shared cross-device fixes loaded into context graph.'), 4500);
            }}>
-             <Blocks className="w-3 h-3 mr-1" /> Add Open-Source Auto-Learners (MCPs)
+             <Blocks className="w-3 h-3 mr-1" /> Deploy 100M Error Watcher
            </Button>
-           <Button variant="ghost" size="sm" className="h-7 text-neutral-400 hover:text-cyan-300 hover:bg-neutral-800 transition-colors" onClick={generateInvite}>
-             <DownloadCloud className="w-3 h-3 mr-1" /> Generate Installer curl
+           <Button variant="ghost" size="sm" className="h-7 text-neutral-400 hover:text-cyan-300 hover:bg-neutral-800 transition-colors" onClick={() => generateInvite()}>
+             <DownloadCloud className="w-3 h-3 mr-1" /> Generate Ext_NonAdmin Cell curl
            </Button>
            <Button variant="ghost" size="sm" className="h-7 px-2 text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors">
              <Settings className="w-4 h-4" />
